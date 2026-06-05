@@ -17,16 +17,15 @@ WIKI_REVIEWER = os.environ.get("WIKI_REVIEWER", "Pd011161")  # GitHub username t
 WIKI_REVIEWER_EMAIL = os.environ.get("WIKI_REVIEWER_EMAIL", "c.predee@gmail.com")
 WIKI_AUTO_PULL = os.environ.get("WIKI_AUTO_PULL", "1") != "0"
 
-mcp = FastMCP(
-    "wiki-mcp",
-    instructions=(
-        "Company LLM Wiki knowledge base. Call wiki_index first to see all available "
-        "pages and their relationships, then wiki_read to read specific pages. "
-        "Use wiki_search to find content across pages. "
-        "To change the wiki, use wiki_edit — it opens a pull request for human review "
-        "and never modifies the shared wiki directly."
-    ),
+INSTRUCTIONS = (
+    "Company LLM Wiki knowledge base. Call wiki_index first to see all available "
+    "pages and their relationships, then wiki_read to read specific pages. "
+    "Use wiki_search to find content across pages. "
+    "To change the wiki, use wiki_edit — it opens a pull request for human review "
+    "and never modifies the shared wiki directly."
 )
+
+mcp = FastMCP("wiki-mcp", instructions=INSTRUCTIONS)
 
 
 def _get_wiki_dir() -> Path:
@@ -309,11 +308,98 @@ def main():
     mcp.run(transport="stdio")
 
 
-def main_http():
-    """Run as a remote HTTP (streamable) server, protected by a shared bearer token.
+class _OAuthTokenVerifier:
+    """Validates bearer tokens issued by an external OAuth provider (Auth0, Stytch, …).
 
-    For team-wide / web clients. Edits are unavailable here (no gh in this mode);
-    use the stdio server to propose changes.
+    Accepts either a valid provider JWT (so Claude.ai / ChatGPT web work via OAuth)
+    or the shared team token (so header-capable clients keep working).
+    """
+
+    def __init__(self, issuer: str, audience: str, static_token: str = ""):
+        import jwt  # provided transitively by mcp
+
+        self._jwt = jwt
+        self._issuer = issuer
+        # Accept the audience with and without a trailing slash: providers and the
+        # MCP resource-metadata normalization don't always agree on it.
+        base = audience.rstrip("/")
+        self._audience = [base, base + "/"]
+        self._static = static_token
+        self._jwk_client = jwt.PyJWKClient(self._discover_jwks(issuer))
+
+    @staticmethod
+    def _discover_jwks(issuer: str) -> str:
+        import json
+        import urllib.request
+
+        base = issuer.rstrip("/")
+        # Try OIDC discovery first, then the OAuth AS metadata (AuthKit/others).
+        for path in ("/.well-known/openid-configuration", "/.well-known/oauth-authorization-server"):
+            try:
+                with urllib.request.urlopen(base + path, timeout=10) as resp:  # noqa: S310
+                    return json.load(resp)["jwks_uri"]
+            except Exception:
+                continue
+        raise RuntimeError(f"Could not discover JWKS endpoint from issuer {issuer}")
+
+    async def verify_token(self, token: str):
+        import hmac
+
+        from mcp.server.auth.provider import AccessToken
+
+        if self._static and hmac.compare_digest(token, self._static):
+            return AccessToken(token=token, client_id="team-token", scopes=[], subject="team")
+        try:
+            key = self._jwk_client.get_signing_key_from_jwt(token).key
+            claims = self._jwt.decode(
+                token, key,
+                algorithms=["RS256", "RS384", "RS512"],
+                audience=self._audience,
+                issuer=self._issuer,
+            )
+        except Exception:
+            return None
+        scope = claims.get("scope", "")
+        return AccessToken(
+            token=token,
+            client_id=claims.get("azp") or claims.get("client_id") or "oauth",
+            scopes=scope.split() if isinstance(scope, str) else list(scope or []),
+            subject=claims.get("sub"),
+            expires_at=claims.get("exp"),
+            claims=claims,
+        )
+
+
+def _oauth_app(issuer: str, audience: str, public_url: str, static_token: str):
+    """Build a streamable-http app that delegates auth to an external OAuth provider."""
+    from mcp.server.auth.settings import AuthSettings
+
+    server = FastMCP(
+        "wiki-mcp",
+        instructions=INSTRUCTIONS,
+        token_verifier=_OAuthTokenVerifier(issuer, audience, static_token),
+        auth=AuthSettings(
+            issuer_url=issuer,
+            resource_server_url=public_url,
+            required_scopes=[],
+        ),
+    )
+    for fn in (wiki_index, wiki_read, wiki_search, wiki_sync, wiki_edit):
+        server.tool()(fn)
+    return server.streamable_http_app()
+
+
+def main_http():
+    """Run as a remote HTTP (streamable) server.
+
+    Two auth modes (auto-selected by env):
+      * OAuth — set OAUTH_ISSUER, OAUTH_AUDIENCE, PUBLIC_URL. Web clients
+        (Claude.ai, ChatGPT) authenticate through the provider. The shared
+        WIKI_AUTH_TOKEN, if set, still works for header-capable clients.
+      * Shared bearer — set only WIKI_AUTH_TOKEN. Works with header-capable
+        clients (Claude Code, Cursor, VS Code), not web OAuth clients.
+
+    Edits are unavailable here (no gh in this mode); use stdio to propose changes.
     """
     import hmac
 
@@ -324,30 +410,42 @@ def main_http():
     from starlette.routing import Route
 
     token = os.environ.get("WIKI_AUTH_TOKEN", "")
-    if not token:
-        raise SystemExit(
-            "WIKI_AUTH_TOKEN is required in HTTP mode so the endpoint is not public. "
-            "Set it to a shared secret and give that secret to your team."
-        )
+    issuer = os.environ.get("OAUTH_ISSUER", "")
+    audience = os.environ.get("OAUTH_AUDIENCE", "")
+    public_url = os.environ.get("PUBLIC_URL", "")
 
     _get_wiki_dir()  # clone/prepare wiki content at startup (fails loudly if it can't)
 
     async def health(_request: Request) -> PlainTextResponse:
         return PlainTextResponse("ok")
 
-    class BearerAuth(BaseHTTPMiddleware):
-        async def dispatch(self, request: Request, call_next):
-            if request.url.path == "/healthz":
-                return await call_next(request)
-            header = request.headers.get("authorization", "")
-            provided = header[7:] if header.startswith("Bearer ") else ""
-            if not hmac.compare_digest(provided, token):
-                return JSONResponse({"error": "unauthorized"}, status_code=401)
-            return await call_next(request)
+    if issuer:
+        if not (audience and public_url):
+            raise SystemExit(
+                "OAUTH_ISSUER is set, so OAUTH_AUDIENCE and PUBLIC_URL are required too."
+            )
+        app = _oauth_app(issuer, audience, public_url, token)
+        app.router.routes.append(Route("/healthz", health, methods=["GET"]))
+    else:
+        if not token:
+            raise SystemExit(
+                "Set WIKI_AUTH_TOKEN (shared-bearer mode) or OAUTH_ISSUER + "
+                "OAUTH_AUDIENCE + PUBLIC_URL (OAuth mode) so the endpoint is not public."
+            )
 
-    app = mcp.streamable_http_app()
-    app.router.routes.append(Route("/healthz", health, methods=["GET"]))
-    app.add_middleware(BearerAuth)
+        class BearerAuth(BaseHTTPMiddleware):
+            async def dispatch(self, request: Request, call_next):
+                if request.url.path == "/healthz":
+                    return await call_next(request)
+                header = request.headers.get("authorization", "")
+                provided = header[7:] if header.startswith("Bearer ") else ""
+                if not hmac.compare_digest(provided, token):
+                    return JSONResponse({"error": "unauthorized"}, status_code=401)
+                return await call_next(request)
+
+        app = mcp.streamable_http_app()
+        app.router.routes.append(Route("/healthz", health, methods=["GET"]))
+        app.add_middleware(BearerAuth)
 
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
 

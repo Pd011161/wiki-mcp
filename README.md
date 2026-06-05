@@ -112,9 +112,34 @@ claude mcp add --transport http wiki https://wiki-mcp.onrender.com/mcp \
   -H "Authorization: Bearer <WIKI_AUTH_TOKEN>"
 ```
 
-**Claude Desktop / Cursor / ChatGPT / Claude.ai** — เพิ่ม remote/custom connector ใส่ URL `https://wiki-mcp.onrender.com/mcp` และ header `Authorization: Bearer <WIKI_AUTH_TOKEN>`
+**Cursor / VS Code** — ใส่ URL + header `Authorization: Bearer <WIKI_AUTH_TOKEN>` ใน MCP config
+
+> ⚠️ **Bearer token ใช้กับ Claude.ai / ChatGPT (เว็บ) ไม่ได้** — เว็บพวกนี้ต้องใช้ OAuth เท่านั้น ดูหัวข้อถัดไป
 
 > รันเองนอก Render ก็ได้: `WIKI_AUTH_TOKEN=xxx WIKI_GIT_TOKEN=ghp_xxx uv run wiki-mcp-http` (ฟัง `0.0.0.0:$PORT`, health ที่ `/healthz`)
+
+### 🔐 ให้ Claude.ai / ChatGPT (เว็บ) ใช้ได้ — OAuth ผ่าน WorkOS AuthKit
+
+เว็บ client เชื่อม MCP ผ่าน **OAuth** (ไม่มีช่องใส่ header) ต้องมี provider เป็นตัวจัดการ login server เราทำหน้าที่ตรวจ token เท่านั้น แนะนำ **WorkOS AuthKit** (ฟรีถึง 1M users, รองรับ MCP โดยตรง)
+
+**ฝั่ง WorkOS (ทำครั้งเดียว):**
+1. สมัคร [workos.com](https://workos.com) → สร้าง environment → เปิดใช้ **AuthKit**
+2. ตั้งวิธี login ของคน (เช่น Google SSO / อีเมล) + จำกัดเฉพาะคนในบริษัท
+3. Dashboard → **Connect → Configuration** → เปิด **Client ID Metadata Document** และ **Dynamic Client Registration (DCR)** (ให้ Claude.ai register ตัวเองได้)
+4. เพิ่ม **Resource Indicator** = `https://wiki-mcp.onrender.com` (ตรงเป๊ะ ไม่มี `/mcp` ต่อท้าย)
+5. ก็อป **AuthKit domain** จาก dashboard (เมนู Authentication/AuthKit) — **อย่าประกอบเอง** WorkOS สร้างให้อัตโนมัติ format อาจเป็น `https://xxx.authkit.app` หรือ `https://xxx.authkit.workos.com`
+   - เช็คถูกตัว: เปิด `https://<domain>/.well-known/oauth-authorization-server` ถ้าได้ JSON = ใช่
+
+**ฝั่ง Render — เพิ่ม 3 env แล้ว server จะสลับเป็นโหมด OAuth อัตโนมัติ:**
+| env | ค่า |
+|-----|-----|
+| `OAUTH_ISSUER` | AuthKit domain เช่น `https://your-workspace.authkit.workos.com` |
+| `OAUTH_AUDIENCE` | `https://wiki-mcp.onrender.com` (ตรงกับ Resource Indicator) |
+| `PUBLIC_URL` | `https://wiki-mcp.onrender.com` |
+
+**ผู้ใช้เชื่อม (เว็บ):** Claude.ai → Settings → Connectors → Add custom connector → ใส่ URL `https://wiki-mcp.onrender.com/mcp` → กด connect → login ผ่าน WorkOS → ใช้ได้ (ไม่ต้องใส่ token เอง)
+
+> โหมด OAuth กับ static bearer อยู่ด้วยกันได้: เว็บใช้ OAuth, CLI/Cursor ยังใช้ `WIKI_AUTH_TOKEN` ได้ถ้าตั้งไว้
 
 ## Environment Variables
 
@@ -129,3 +154,6 @@ claude mcp add --transport http wiki https://wiki-mcp.onrender.com/mcp \
 | `WIKI_AUTH_TOKEN` | **(HTTP mode)** bearer token ที่ client ต้องส่งมา — บังคับมี | _(ต้องตั้ง)_ |
 | `WIKI_GIT_TOKEN` | **(HTTP mode)** GitHub token ให้ server clone wiki_source ส่วนตัว | _(ใช้ `GITHUB_TOKEN` ได้)_ |
 | `PORT` | **(HTTP mode)** port ที่ฟัง | `8000` |
+| `OAUTH_ISSUER` | **(OAuth)** URL ของ provider (เช่น AuthKit domain) — ตั้งแล้วสลับเป็นโหมด OAuth | _(ปิด OAuth)_ |
+| `OAUTH_AUDIENCE` | **(OAuth)** resource indicator (= public URL ของ server) | _(ต้องตั้งคู่กับ issuer)_ |
+| `PUBLIC_URL` | **(OAuth)** base URL ของ server เช่น `https://wiki-mcp.onrender.com` | _(ต้องตั้งคู่กับ issuer)_ |

@@ -344,21 +344,34 @@ class _OAuthTokenVerifier:
 
     async def verify_token(self, token: str):
         import hmac
+        import logging
 
         from mcp.server.auth.provider import AccessToken
+
+        log = logging.getLogger("wiki_mcp.auth")
 
         if self._static and hmac.compare_digest(token, self._static):
             return AccessToken(token=token, client_id="team-token", scopes=[], subject="team")
         try:
             key = self._jwk_client.get_signing_key_from_jwt(token).key
+            # Verify signature + audience here; check issuer manually below so a
+            # trailing-slash difference doesn't cause a spurious rejection.
             claims = self._jwt.decode(
                 token, key,
                 algorithms=["RS256", "RS384", "RS512"],
                 audience=self._audience,
-                issuer=self._issuer,
+                options={"verify_iss": False},
             )
-        except Exception:
+        except Exception as exc:
+            log.warning("wiki-mcp: token rejected during decode: %s", exc)
             return None
+
+        token_iss = (claims.get("iss") or "").rstrip("/")
+        if token_iss != self._issuer.rstrip("/"):
+            log.warning("wiki-mcp: issuer mismatch: token=%r expected=%r", token_iss, self._issuer)
+            return None
+
+        log.info("wiki-mcp: token accepted sub=%s aud=%s", claims.get("sub"), claims.get("aud"))
         scope = claims.get("scope", "")
         return AccessToken(
             token=token,
@@ -366,6 +379,7 @@ class _OAuthTokenVerifier:
             scopes=scope.split() if isinstance(scope, str) else list(scope or []),
             subject=claims.get("sub"),
             expires_at=claims.get("exp"),
+            resource=self._audience[0],
             claims=claims,
         )
 

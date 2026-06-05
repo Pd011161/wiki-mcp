@@ -1,0 +1,15 @@
+[project]
+name = "wiki-mcp"
+version = "0.1.0"
+description = "MCP server for accessing the company LLM Wiki knowledge base"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]>=1.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+wiki-mcp = "wiki_mcp.server:main"

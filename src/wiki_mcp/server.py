@@ -384,13 +384,32 @@ class _OAuthTokenVerifier:
         )
 
 
-def _oauth_app(issuer: str, audience: str, public_url: str, static_token: str):
-    """Build a streamable-http app that delegates auth to an external OAuth provider."""
-    from mcp.server.auth.settings import AuthSettings
+def _build_http_server(**kwargs) -> FastMCP:
+    """Build a FastMCP for HTTP serving with the wiki tools registered.
+
+    DNS-rebinding protection is disabled because the server runs behind a TLS
+    reverse proxy (e.g. Render) under an external hostname and is already
+    protected by auth — the default localhost-only Host allowlist would
+    otherwise reject every proxied request with 421.
+    """
+    from mcp.server.transport_security import TransportSecuritySettings
 
     server = FastMCP(
         "wiki-mcp",
         instructions=INSTRUCTIONS,
+        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+        **kwargs,
+    )
+    for fn in (wiki_index, wiki_read, wiki_search, wiki_sync, wiki_edit):
+        server.tool()(fn)
+    return server
+
+
+def _oauth_app(issuer: str, audience: str, public_url: str, static_token: str):
+    """Build a streamable-http app that delegates auth to an external OAuth provider."""
+    from mcp.server.auth.settings import AuthSettings
+
+    server = _build_http_server(
         token_verifier=_OAuthTokenVerifier(issuer, audience, static_token),
         auth=AuthSettings(
             issuer_url=issuer,
@@ -398,8 +417,6 @@ def _oauth_app(issuer: str, audience: str, public_url: str, static_token: str):
             required_scopes=[],
         ),
     )
-    for fn in (wiki_index, wiki_read, wiki_search, wiki_sync, wiki_edit):
-        server.tool()(fn)
     return server.streamable_http_app()
 
 
@@ -457,7 +474,7 @@ def main_http():
                     return JSONResponse({"error": "unauthorized"}, status_code=401)
                 return await call_next(request)
 
-        app = mcp.streamable_http_app()
+        app = _build_http_server().streamable_http_app()
         app.router.routes.append(Route("/healthz", health, methods=["GET"]))
         app.add_middleware(BearerAuth)
 

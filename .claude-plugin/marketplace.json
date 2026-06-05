@@ -1,0 +1,14 @@
+{
+  "name": "one7ai-wiki",
+  "owner": {
+    "name": "Predee Chaiyakit",
+    "email": "c.predee@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "wiki",
+      "source": "./",
+      "description": "Access the company LLM Wiki: search, read, and propose edits via pull request."
+    }
+  ]
+}

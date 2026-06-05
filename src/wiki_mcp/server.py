@@ -9,6 +9,9 @@ from mcp.server.fastmcp import FastMCP
 
 # --- Configuration (all overridable via environment) ---
 WIKI_SOURCE_DIR = os.environ.get("WIKI_SOURCE_DIR", "")
+WIKI_REPO_URL = os.environ.get(
+    "WIKI_REPO_URL", "https://github.com/Pd011161/wiki_source.git"
+)
 WIKI_BRANCH = os.environ.get("WIKI_BRANCH", "use")
 WIKI_REVIEWER = os.environ.get("WIKI_REVIEWER", "Pd011161")  # GitHub username to request review from
 WIKI_REVIEWER_EMAIL = os.environ.get("WIKI_REVIEWER_EMAIL", "c.predee@gmail.com")
@@ -27,15 +30,40 @@ mcp = FastMCP(
 
 
 def _get_wiki_dir() -> Path:
+    """Resolve the wiki_source directory, cloning it on first use if needed.
+
+    Resolution order:
+      1. WIKI_SOURCE_DIR if set (cloned there if it doesn't exist yet)
+      2. a sibling ../wiki_source next to this repo (manual / side-by-side clone)
+      3. a per-user cache directory, auto-cloned from WIKI_REPO_URL
+
+    This lets the server work with zero manual setup (uvx / plugin) while still
+    honoring an existing local clone.
+    """
     if WIKI_SOURCE_DIR:
-        p = Path(WIKI_SOURCE_DIR)
+        p = Path(WIKI_SOURCE_DIR).expanduser()
     else:
-        p = Path(__file__).resolve().parent.parent.parent.parent / "wiki_source"
-    if not p.is_dir():
-        raise FileNotFoundError(
-            f"wiki_source directory not found at {p}. "
-            f"Set WIKI_SOURCE_DIR environment variable to the correct path."
+        sibling = Path(__file__).resolve().parents[3] / "wiki_source"
+        p = sibling if sibling.is_dir() else (Path.home() / ".cache" / "wiki-mcp" / "wiki_source")
+
+    if not (p / ".git").is_dir():
+        if p.exists() and any(p.iterdir()):
+            raise FileNotFoundError(
+                f"{p} exists but is not a git clone of the wiki. "
+                f"Remove it or set WIKI_SOURCE_DIR to a valid clone."
+            )
+        p.parent.mkdir(parents=True, exist_ok=True)
+        res = subprocess.run(
+            ["git", "clone", "--branch", WIKI_BRANCH, WIKI_REPO_URL, str(p)],
+            capture_output=True, text=True,
         )
+        if res.returncode != 0:
+            raise FileNotFoundError(
+                f"Could not clone the wiki from {WIKI_REPO_URL} (branch '{WIKI_BRANCH}').\n"
+                f"{res.stderr.strip()}\n"
+                f"If the repository is private, run 'gh auth login' or set up git "
+                f"credentials, or set WIKI_SOURCE_DIR to an existing local clone."
+            )
     return p
 
 

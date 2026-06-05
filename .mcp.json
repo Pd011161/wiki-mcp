@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wiki": {
+      "command": "uvx",
+      "args": ["--from", "${CLAUDE_PLUGIN_ROOT}", "wiki-mcp"]
+    }
+  }
+}

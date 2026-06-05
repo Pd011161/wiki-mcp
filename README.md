@@ -27,79 +27,67 @@ MCP server สำหรับเข้าถึง Company LLM Wiki knowledge ba
 - **ไม่ merge ให้เอง** — รอคนตรวจเสมอ
 - Approver ระบุไว้ใน PR body (`WIKI_REVIEWER_EMAIL`); ถ้าตั้ง `WIKI_REVIEWER` เป็น GitHub username จะ request review ให้ด้วย
 
-## วิธีติดตั้ง (สำหรับทีม)
+## ติดตั้งครั้งเดียว (ทุกวิธีต้องมี)
 
-### ขั้นตอนที่ 1: Clone repos
+ติดตั้ง `uv` — ตัวจัดการ Python (ไม่ต้องลง Python เอง):
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+> **wiki_source โหลดให้อัตโนมัติ** — ไม่ต้อง clone เนื้อหาเอง server จะ `git clone` มาเก็บที่ `~/.cache/wiki-mcp/` ครั้งแรก แล้ว `git pull` ให้สดทุกครั้ง (ต้องมีสิทธิ์เข้า repo — ถ้ายังไม่เคย login ให้รัน `gh auth login` หรือตั้ง git credential ก่อน)
+
+## วิธีเชื่อมต่อ (เลือก 1 วิธี)
+
+### วิธี A — Claude Code Plugin ⭐ ง่ายสุด
 
 ```bash
-# Clone ทั้ง wiki_source และ wiki-mcp ไว้ข้างๆ กัน
-git clone https://github.com/Pd011161/wiki-mcp.git
-git clone <wiki_source_repo_url> wiki_source
+/plugin marketplace add Pd011161/wiki-mcp
+/plugin install wiki@one7ai-wiki
 ```
+เสร็จ! ไม่ต้อง clone ไม่ต้องแก้ config — และได้ของใหม่อัตโนมัติเมื่อมีการอัปเดต
 
-โครงสร้างที่ควรได้:
-```
-your-folder/
-├── wiki-mcp/
-└── wiki_source/
-```
+### วิธี B — uvx รันจาก git (ใช้ได้ทุก agent)
 
-### ขั้นตอนที่ 2: เชื่อมต่อ agent
+ไม่ต้อง clone โค้ด `uvx` โหลดมารันให้เอง
 
-เลือกตาม agent ที่ใช้:
-
-#### Claude Code (CLI)
-
+**Claude Code (CLI):**
 ```bash
-# รันจากใน project ที่ต้องการใช้ wiki
-claude mcp add wiki-mcp \
-  -e WIKI_SOURCE_DIR=/absolute/path/to/wiki_source \
-  -- uv run --directory /absolute/path/to/wiki-mcp wiki-mcp
+claude mcp add wiki -- uvx --from git+https://github.com/Pd011161/wiki-mcp.git wiki-mcp
 ```
 
-#### Claude Desktop
-
-แก้ไฟล์ `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
+**Claude Desktop / Cursor / Windsurf** — แก้ MCP config (Claude Desktop อยู่ที่ `~/Library/Application Support/Claude/claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
-    "wiki-mcp": {
-      "command": "uv",
-      "args": ["run", "--directory", "/absolute/path/to/wiki-mcp", "wiki-mcp"],
-      "env": {
-        "WIKI_SOURCE_DIR": "/absolute/path/to/wiki_source"
-      }
+    "wiki": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/Pd011161/wiki-mcp.git", "wiki-mcp"]
     }
   }
 }
 ```
 
-#### Cursor / Windsurf / อื่นๆ
+### วิธี C — Clone เอง (offline / นักพัฒนา)
 
-เพิ่มใน MCP config ของ editor (ดู docs ของแต่ละตัว) ด้วย format เดียวกับ Claude Desktop
+```bash
+git clone https://github.com/Pd011161/wiki-mcp.git
+claude mcp add wiki -- uv run --directory "$(pwd)/wiki-mcp" wiki-mcp
+```
+จะ clone `wiki_source` ไว้ข้างๆ เองก็ได้ (`../wiki_source`) server จะใช้ตัวนั้นแทน cache
 
-### ขั้นตอนที่ 3: ทดสอบ
+## ทดสอบ
 
-พิมพ์ถาม agent ว่า:
-> "ช่วยดู wiki index ให้หน่อย"
+พิมพ์ถาม agent ว่า *"ช่วยดู wiki index ให้หน่อย"* — ถ้าขึ้นสารบัญ wiki แปลว่าใช้ได้
 
-agent จะเรียก `wiki_index` แล้วแสดงสารบัญ wiki ทั้งหมด
-
-## Requirements
-
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) (Python package manager)
-  ```bash
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  ```
-- ไม่ต้องติดตั้ง Python เอง — uv จัดการให้อัตโนมัติ
+> หมายเหตุ: ทุกวิธีต้องให้ repo `wiki-mcp` เป็น **public** (โค้ดเข้าถึงข้อมูล ไม่มีความลับ) ส่วน `wiki_source` เป็น private ได้ปกติ — server เข้าถึงด้วย git credential ของผู้ใช้แต่ละคน
 
 ## Environment Variables
 
 | ตัวแปร | คำอธิบาย | ค่า default |
 |--------|----------|-------------|
-| `WIKI_SOURCE_DIR` | path ไปยัง wiki_source directory | `../wiki_source` (relative to wiki-mcp) |
-| `WIKI_BRANCH` | branch ที่ทีมใช้ร่วมกัน (pull จากตรงนี้ + PR เข้าตรงนี้) | `use` |
+| `WIKI_SOURCE_DIR` | path ไปยัง wiki_source (ถ้าตั้ง จะใช้/โคลนที่นี่แทน cache) | _(auto: sibling หรือ `~/.cache/wiki-mcp/wiki_source`)_ |
+| `WIKI_REPO_URL` | git URL ของ wiki_source ที่ใช้ auto-clone | `https://github.com/Pd011161/wiki_source.git` |
+| `WIKI_BRANCH` | branch ที่ทีมใช้ร่วมกัน (clone/pull จากตรงนี้ + PR เข้าตรงนี้) | `use` |
 | `WIKI_REVIEWER_EMAIL` | email ของ approver ที่ใส่ลง PR body | `c.predee@gmail.com` |
 | `WIKI_REVIEWER` | GitHub *username* ของ reviewer (จะ request review ให้อัตโนมัติ) | `Pd011161` |
 | `WIKI_AUTO_PULL` | `git pull` อัตโนมัติตอนเปิด server (`0` = ปิด) | `1` |

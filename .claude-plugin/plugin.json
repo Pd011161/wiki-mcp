@@ -1,0 +1,9 @@
+{
+  "name": "wiki",
+  "description": "Access the company LLM Wiki knowledge base: search, read, and propose edits (via pull request) to shared company knowledge.",
+  "author": {
+    "name": "Predee Chaiyakit",
+    "email": "c.predee@gmail.com"
+  },
+  "homepage": "https://github.com/Pd011161/wiki-mcp"
+}

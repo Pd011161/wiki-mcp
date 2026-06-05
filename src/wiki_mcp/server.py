@@ -54,7 +54,7 @@ def _get_wiki_dir() -> Path:
             )
         p.parent.mkdir(parents=True, exist_ok=True)
         res = subprocess.run(
-            ["git", "clone", "--branch", WIKI_BRANCH, WIKI_REPO_URL, str(p)],
+            ["git", "clone", "--branch", WIKI_BRANCH, _authed_repo_url(), str(p)],
             capture_output=True, text=True,
         )
         if res.returncode != 0:
@@ -65,6 +65,14 @@ def _get_wiki_dir() -> Path:
                 f"credentials, or set WIKI_SOURCE_DIR to an existing local clone."
             )
     return p
+
+
+def _authed_repo_url() -> str:
+    """Embed a token into the clone URL when one is provided (for headless servers)."""
+    token = os.environ.get("WIKI_GIT_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if token and WIKI_REPO_URL.startswith("https://"):
+        return WIKI_REPO_URL.replace("https://", f"https://x-access-token:{token}@", 1)
+    return WIKI_REPO_URL
 
 
 def _git(*args: str, cwd: Path, check: bool = True) -> subprocess.CompletedProcess:
@@ -299,6 +307,49 @@ def _auto_pull() -> None:
 def main():
     _auto_pull()
     mcp.run(transport="stdio")
+
+
+def main_http():
+    """Run as a remote HTTP (streamable) server, protected by a shared bearer token.
+
+    For team-wide / web clients. Edits are unavailable here (no gh in this mode);
+    use the stdio server to propose changes.
+    """
+    import hmac
+
+    import uvicorn
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.requests import Request
+    from starlette.responses import JSONResponse, PlainTextResponse
+    from starlette.routing import Route
+
+    token = os.environ.get("WIKI_AUTH_TOKEN", "")
+    if not token:
+        raise SystemExit(
+            "WIKI_AUTH_TOKEN is required in HTTP mode so the endpoint is not public. "
+            "Set it to a shared secret and give that secret to your team."
+        )
+
+    _get_wiki_dir()  # clone/prepare wiki content at startup (fails loudly if it can't)
+
+    async def health(_request: Request) -> PlainTextResponse:
+        return PlainTextResponse("ok")
+
+    class BearerAuth(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            if request.url.path == "/healthz":
+                return await call_next(request)
+            header = request.headers.get("authorization", "")
+            provided = header[7:] if header.startswith("Bearer ") else ""
+            if not hmac.compare_digest(provided, token):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            return await call_next(request)
+
+    app = mcp.streamable_http_app()
+    app.router.routes.append(Route("/healthz", health, methods=["GET"]))
+    app.add_middleware(BearerAuth)
+
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
 
 
 if __name__ == "__main__":

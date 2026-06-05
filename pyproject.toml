@@ -5,6 +5,8 @@ description = "MCP server for accessing the company LLM Wiki knowledge base"
 requires-python = ">=3.10"
 dependencies = [
     "mcp[cli]>=1.0.0",
+    "uvicorn>=0.30",
+    "starlette>=0.37",
 ]
 
 [build-system]
@@ -13,3 +15,4 @@ build-backend = "hatchling.build"
 
 [project.scripts]
 wiki-mcp = "wiki_mcp.server:main"
+wiki-mcp-http = "wiki_mcp.server:main_http"

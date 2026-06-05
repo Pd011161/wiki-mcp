@@ -81,6 +81,34 @@ claude mcp add wiki -- uv run --directory "$(pwd)/wiki-mcp" wiki-mcp
 
 > หมายเหตุ: ทุกวิธีต้องให้ repo `wiki-mcp` เป็น **public** (โค้ดเข้าถึงข้อมูล ไม่มีความลับ) ส่วน `wiki_source` เป็น private ได้ปกติ — server เข้าถึงด้วย git credential ของผู้ใช้แต่ละคน
 
+---
+
+## วิธี D — Remote server (HTTP) สำหรับทั้งบริษัท / ใช้ผ่านเว็บ
+
+แทนที่จะให้ทุกคนรันในเครื่อง สามารถ deploy เป็น HTTP server ตัวเดียว แล้วทุกคนเชื่อมด้วย **URL** ได้ — รองรับ **ChatGPT / Claude.ai เว็บ** ด้วย (stdio ทำไม่ได้)
+
+> **โหมดนี้เป็น read-only** (`wiki_index`, `wiki_read`, `wiki_search`, `wiki_sync`) — `wiki_edit` ปิดไว้ ใครจะแก้ wiki ให้ใช้ stdio (วิธี A–C)
+
+### Deploy บน Render (Docker)
+
+1. Push repo นี้ขึ้น GitHub (มี `Dockerfile` + `render.yaml` ให้แล้ว)
+2. Render → **New** → **Blueprint** → เลือก repo นี้ (อ่าน `render.yaml` อัตโนมัติ)
+3. ตั้ง env 1 ตัวเอง: **`WIKI_GIT_TOKEN`** = GitHub token (อ่าน `wiki_source` ได้) เพื่อให้ server clone wiki ส่วนตัวได้
+   - `WIKI_AUTH_TOKEN` Render สุ่มให้เอง → ก็อปจาก dashboard ไปแจกทีม
+4. Deploy เสร็จได้ URL เช่น `https://wiki-mcp.onrender.com/mcp`
+
+### ผู้ใช้เชื่อมต่อ (ใส่ URL + token)
+
+**Claude Code:**
+```bash
+claude mcp add --transport http wiki https://wiki-mcp.onrender.com/mcp \
+  -H "Authorization: Bearer <WIKI_AUTH_TOKEN>"
+```
+
+**Claude Desktop / Cursor / ChatGPT / Claude.ai** — เพิ่ม remote/custom connector ใส่ URL `https://.../mcp` และ header `Authorization: Bearer <WIKI_AUTH_TOKEN>`
+
+> รันเองนอก Render ก็ได้: `WIKI_AUTH_TOKEN=xxx WIKI_GIT_TOKEN=ghp_xxx uv run wiki-mcp-http` (ฟัง `0.0.0.0:$PORT`, health ที่ `/healthz`)
+
 ## Environment Variables
 
 | ตัวแปร | คำอธิบาย | ค่า default |
@@ -91,3 +119,6 @@ claude mcp add wiki -- uv run --directory "$(pwd)/wiki-mcp" wiki-mcp
 | `WIKI_REVIEWER_EMAIL` | email ของ approver ที่ใส่ลง PR body | `c.predee@gmail.com` |
 | `WIKI_REVIEWER` | GitHub *username* ของ reviewer (จะ request review ให้อัตโนมัติ) | `Pd011161` |
 | `WIKI_AUTO_PULL` | `git pull` อัตโนมัติตอนเปิด server (`0` = ปิด) | `1` |
+| `WIKI_AUTH_TOKEN` | **(HTTP mode)** bearer token ที่ client ต้องส่งมา — บังคับมี | _(ต้องตั้ง)_ |
+| `WIKI_GIT_TOKEN` | **(HTTP mode)** GitHub token ให้ server clone wiki_source ส่วนตัว | _(ใช้ `GITHUB_TOKEN` ได้)_ |
+| `PORT` | **(HTTP mode)** port ที่ฟัง | `8000` |

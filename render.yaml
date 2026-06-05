@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: wiki-mcp
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      # Shared bearer token clients must send. Render generates a strong value;
+      # copy it from the dashboard and give it to your team.
+      - key: WIKI_AUTH_TOKEN
+        generateValue: true
+      # GitHub token (PAT or fine-grained, read access to wiki_source) so the
+      # server can clone the private wiki. Set this manually in the dashboard.
+      - key: WIKI_GIT_TOKEN
+        sync: false
+      - key: WIKI_BRANCH
+        value: use

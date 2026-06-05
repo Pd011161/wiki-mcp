@@ -95,7 +95,14 @@ claude mcp add wiki -- uv run --directory "$(pwd)/wiki-mcp" wiki-mcp
 2. Render → **New** → **Blueprint** → เลือก repo นี้ (อ่าน `render.yaml` อัตโนมัติ)
 3. ตั้ง env 1 ตัวเอง: **`WIKI_GIT_TOKEN`** = GitHub token (อ่าน `wiki_source` ได้) เพื่อให้ server clone wiki ส่วนตัวได้
    - `WIKI_AUTH_TOKEN` Render สุ่มให้เอง → ก็อปจาก dashboard ไปแจกทีม
-4. Deploy เสร็จได้ URL เช่น `https://wiki-mcp.onrender.com/mcp`
+4. Deploy เสร็จได้ URL ของ service → เติม `/mcp` ต่อท้าย = endpoint สำหรับแจกทีม
+
+### 🌐 Live endpoint (ใช้งานจริงแล้ว)
+
+```
+https://wiki-mcp.onrender.com/mcp
+```
+ขอ `WIKI_AUTH_TOKEN` (bearer token ของทีม) จากผู้ดูแล แล้วเชื่อมตามด้านล่าง
 
 ### ผู้ใช้เชื่อมต่อ (ใส่ URL + token)
 
@@ -105,7 +112,7 @@ claude mcp add --transport http wiki https://wiki-mcp.onrender.com/mcp \
   -H "Authorization: Bearer <WIKI_AUTH_TOKEN>"
 ```
 
-**Claude Desktop / Cursor / ChatGPT / Claude.ai** — เพิ่ม remote/custom connector ใส่ URL `https://.../mcp` และ header `Authorization: Bearer <WIKI_AUTH_TOKEN>`
+**Claude Desktop / Cursor / ChatGPT / Claude.ai** — เพิ่ม remote/custom connector ใส่ URL `https://wiki-mcp.onrender.com/mcp` และ header `Authorization: Bearer <WIKI_AUTH_TOKEN>`
 
 > รันเองนอก Render ก็ได้: `WIKI_AUTH_TOKEN=xxx WIKI_GIT_TOKEN=ghp_xxx uv run wiki-mcp-http` (ฟัง `0.0.0.0:$PORT`, health ที่ `/healthz`)
 
